@@ -1935,6 +1935,7 @@ function add_google_analytics() { ?>
 }
 
 // add_action( 'init', 'issuu_folder_update' );
+add_action('issuu_folder_list_update', 'issuu_folder_update');
  
 function issuu_folder_update() {
 
@@ -1974,6 +1975,7 @@ function issuu_folder_update() {
 }
 
 // add_action( 'init', 'add_embed_document' );
+add_action('update_embed_document', 'add_embed_document');
 
 function add_embed_document() {
 
@@ -2059,9 +2061,10 @@ function add_embed_document() {
 
 
 
-// add_action( 'init', 'issuu_magazine' );
+// add_action( 'init', 'issuu_magazine_update' );
+add_action('issuu_magazine_archive_update', 'issuu_magazine_update');
 
-function issuu_magazine() {
+function issuu_magazine_update() {
 
 
 		$plugin_dir = ABSPATH . 'wp-content/plugins/issuu/issuuApi.php';
@@ -2073,6 +2076,24 @@ function issuu_magazine() {
 		{
 			return intval($integer_num / 100);
 		}
+
+
+		$folder_list = $client->getFolderList(0, 10);
+		$folderId = array();
+		$folderName = array();
+		$folder_structure = $folder_list['rsp']['_content']['result']['_content'];
+	
+	
+		foreach ($folder_structure as $key => $value) {
+			$value_folder_id = $value['folder']['folderId'];
+			$value_folder_name = $value['folder']['name'];
+	
+			array_push($folderId, $value_folder_id);
+			array_push($folderName, $value_folder_name);
+		}
+	
+		$combine_array = array_combine($folderId, $folderName);
+
 
 		/**
 		 * 
@@ -2092,9 +2113,15 @@ function issuu_magazine() {
 				$document_array = [
 					"documentId"    => $value['document']['documentId'],
 					"title"         => $value['document']['title'],
+					"publishDate"   => $value['document']['publishDate'],
 					"description"   => isset($value['document']['description']) ? $value['document']['description'] : '',
-					'folders'       => isset($value['document']['folders'][0]) ? $value['document']['folders'][0] : 'uncategorized'
+					// "folders"       => isset($value['document']['folders'][0]) ? $value['document']['folders'][0] : 'issuu-uncategorized'
 				];
+				if(isset($value['document']['folders'][0])){
+					$document_array['folders'] = array_key_exists($value['document']['folders'][0], $combine_array) ? $combine_array[$value['document']['folders'][0]] : 'issuu-uncategorized';
+				}else{
+					$document_array['folders'] = 'issuu-uncategorized';
+				}
 				// echo '<pre>', print_r($document_array) ,'</pre>';
 				array_push($document_list_array , $document_array);
 			}
@@ -2126,10 +2153,14 @@ function issuu_magazine() {
 			}
 		}
 
+		/**
+		 * 
+		 * Merge Array 
+		 * 
+		 **/ 
 		$merge_array = array();
 
 		foreach ($document_list_array as $key => &$value_1) {
-			// if($value['name'])
 			foreach ($document_embed_list_array as $key => $value_2) {
 				if (!empty($value_2['documentId'])) {
 					if($value_1['documentId'] === $value_2['documentId']) {
@@ -2142,21 +2173,26 @@ function issuu_magazine() {
 		// echo 'Merge array <pre>', print_r($merge_array) ,'</pre>';
 
 		foreach ($merge_array as $value) {
-			$post_id = array(
-				'post_type' 	=> 'issuu-magazines',
-				'post_title'    => $value['title'],
-				'post_content'  => $value['description'],
-				'post_status'   => 'publish',
-				'post_author'   => 1,
-				'tax_input'    => array(
-					'issuu_folder'     => $value['folders'],
-				)
-			);
+			// $mypost = post_exists($value['title'],'','','issuu-magazines');
+			$mypost = get_page_by_title($value['title'], OBJECT, 'issuu-magazines');
+			if(empty($mypost)){
+				$post_id = array(
+					'post_type' 	=> 'issuu-magazines',
+					'post_title'    => $value['title'],
+					'post_content'  => $value['description'],
+					'post_status'   => 'publish',
+					'post_author'   => 1,
+				);
+	
+				$id = wp_insert_post( $post_id );
 
-			$id = wp_insert_post( $post_id );
+				wp_set_object_terms( $id, $value['folders'], 'issuu_folder' );
+				update_field( 'embed_id', $value['id'] , $id );
+				update_field( 'embed_doc', $client->getEmbedHtml($value['id']) , $id );
+				update_field( 'publish_date', $value['publishDate'] , $id );
 
-			update_field( 'embed_id', $value['id'] , $id );
-			update_field( 'embed_doc', $client->getEmbedHtml($value['id']) , $id );
+			}
+
 
 			// add_post_meta($post_id, 'embed_doc', $client->getEmbedHtml($value['id']));
 		}
